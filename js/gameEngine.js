@@ -3,24 +3,49 @@
 /**
  * gameEngine.js — Motor principal del juego "Misión Extintor"
  * Depende de: fireData.js (EXTINGUISHERS, SCENARIOS, FIRE_CLASSES)
- *             uiManager.js (UI)
+ *             uiManager.js (UI, AudioManager)
  */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALIBRACIÓN DE COLISIONES Y EXTINCIÓN (Constantes de Jugabilidad)
+// ─────────────────────────────────────────────────────────────────────────────
+const MIN_HITBOX_WIDTH     = 110; // Ancho mínimo de hitbox_base (desacoplado de lo visual)
+const MIN_HITBOX_HEIGHT    = 65;  // Alto mínimo de hitbox_base
+const SPRAY_RADIUS         = 45;  // Radio de aspersión del chorro con ratón (AoE)
+const SPRAY_RADIUS_TOUCH   = 60;  // Radio de aspersión ampliado para pantallas táctiles
+const EXTINGUISH_THRESHOLD = 8;   // Umbral de remate automático (Snap-to-Zero al bajar del 8%)
 
 class GameEngine {
   /**
    * @param {HTMLCanvasElement} canvas  - Elemento canvas del juego
-   * @param {AudioContext}      audioCtx - Contexto de audio Web API
+   * @param {AudioContext}      audioCtx - Contexto de audio Web API (opcional)
    */
   constructor(canvas, audioCtx) {
     // Referencia al canvas y contexto 2D
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
 
-    // Contexto de audio (puede ser null si el navegador no lo soporta)
+    // Contexto de audio (opcional, AudioManager gestiona el sonido principal)
     this.audioCtx = audioCtx;
 
     // Posición del puntero en el canvas
     this.pointerPos = { x: canvas.width / 2, y: canvas.height / 2 };
+
+    // Radio de aspersión dinámico y estado de interacción táctil
+    this.isTouch = false;
+    this.currentSprayRadius = SPRAY_RADIUS;
+
+    // Flags de impacto del chorro en tiempo real
+    this.isHittingBase = false;
+    this.isHittingTop  = false;
+
+    // Estado del remate automático (Snap-to-Zero)
+    this.snapToZero = false;
+    this.snapStartTime = 0;
+    this.snapStartIntensity = 0;
+
+    // Sistema de partículas dinámico (fuego, chispas, humo, vapor blanco)
+    this.particles = [];
 
     // Historial de posiciones X del puntero para detección de barrido
     this._pointerHistory = [];
@@ -35,21 +60,21 @@ class GameEngine {
       selectedExtinguisher: null,
       pinPulled: false,         // ¿se jaló el pasador (pin)?
       tape: {                   // Indicadores T-A-P-E del extintor
-        T: false,  // Jalar el pasador (Twist/Pull pin)
+        T: false,  // Tirar el seguro
         A: false,  // Apuntar a la base
-        P: false,  // Presionar el maneral
-        E: false,  // Efectuar barrido
+        P: false,  // Presionar la manija
+        E: false,  // Esparcir en barrido
       },
-      diagnosisAttempts: 0,    // Intentos erróneos de diagnóstico de incendio
-      selectAttempts: 0,       // Intentos erróneos de selección de extintor
-      baseHits: 0,             // Fotogramas apuntando a la base del fuego
-      topHits: 0,              // Fotogramas apuntando a la parte superior
-      sweepDetected: false,    // ¿Se realizó el movimiento de barrido?
+      diagnosisAttempts: 0,    // Intentos erróneos de diagnóstico
+      selectAttempts: 0,       // Intentos erróneos de selección
+      baseHits: 0,             // Fotogramas apuntando a la base
+      topHits: 0,              // Fotogramas apuntando a las llamas
+      sweepDetected: false,    // ¿Se realizó el barrido horizontal?
       lastPointerX: null,
       sweepDistance: 0,
-      shooting: false,         // ¿El jugador está disparando el extintor?
+      shooting: false,         // ¿El jugador está descargando el extintor?
       animFrame: null,         // ID del requestAnimationFrame activo
-      timerInterval: null,     // ID del setInterval del temporizador
+      timerInterval: null,     // ID del setInterval del cronómetro
     };
 
     // Inicializar eventos de puntero en el canvas
@@ -58,7 +83,7 @@ class GameEngine {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // RENDERIZADO DEL CANVAS
+  // RENDERIZADO DEL CANVAS Y ESCENA
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -69,31 +94,35 @@ class GameEngine {
     const ctx = this.ctx;
     const W = this.canvas.width;
     const H = this.canvas.height;
+    if (!scenario || !scenario.visualConfig) return;
     const cfg = scenario.visualConfig;
 
     // Limpiar el canvas y pintar el fondo del escenario
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = cfg.bgColor;
+    ctx.fillStyle = cfg.bgColor || '#111827';
     ctx.fillRect(0, 0, W, H);
 
-    // Dibujar los elementos visuales de la escena (muebles, objetos, etc.)
+    // Dibujar los elementos visuales de la escena (muebles, estufa, regleta, etc.)
     this._drawElements(cfg.elements, W, H);
 
-    // Dibujar el fuego en cada punto de incendio
+    // Obtener los hitboxes calculados con tamaño mínimo desacoplado
+    const boxes = this._getHitboxes();
+
+    // Dibujar el fuego dinámico y partículas en cada foco de incendio
     for (const fp of cfg.firePoints) {
-      this._drawFire(fp);
+      this._drawFire(fp, boxes);
     }
 
-    // Dibujar los hitboxes (contornos de depuración, 20% opacidad)
-    for (const fp of cfg.firePoints) {
-      this._drawHitboxes(fp);
+    // Dibujar hitboxes de depuración en modo combate (contornos sutiles)
+    if (this.state.phase === 'combat' && boxes) {
+      this._drawHitboxes(boxes);
     }
 
     // Dibujar la mira/retícula cuando estamos en fase de combate
     if (this.state.phase === 'combat') {
       this._drawReticle();
 
-      // Dibujar el chorro del extintor si se está disparando y el pin fue jalado
+      // Dibujar el chorro del extintor si se está disparando y el pin fue retirado
       if (this.state.shooting && this.state.tape.P) {
         this._drawStream();
       }
@@ -102,11 +131,12 @@ class GameEngine {
 
   /**
    * Dibuja los elementos decorativos del escenario (rectángulos, elipses).
-   * @param {Array}  elements - Array de objetos de elemento visual
+   * @param {Array}  elements - Array de objetos de elementos visuales
    * @param {number} W        - Ancho del canvas
    * @param {number} H        - Alto del canvas
    */
   _drawElements(elements, W, H) {
+    if (!elements || !elements.length) return;
     const ctx = this.ctx;
 
     for (const el of elements) {
@@ -116,19 +146,17 @@ class GameEngine {
       if (el.type === 'rect') {
         ctx.fillRect(el.x, el.y, el.w, el.h);
 
-        // Etiqueta opcional sobre el elemento
         if (el.label) {
-          ctx.fillStyle = 'rgba(255,255,255,0.7)';
-          ctx.font = '11px system-ui';
+          ctx.fillStyle = 'rgba(255,255,255,0.65)';
+          ctx.font = '600 11px system-ui';
           ctx.textAlign = 'center';
           ctx.fillText(el.label, el.x + el.w / 2, el.y + el.h / 2 + 4);
         }
-
       } else if (el.type === 'ellipse') {
         ctx.beginPath();
         ctx.ellipse(
-          el.x + el.w / 2,
-          el.y + el.h / 2,
+          el.x,
+          el.y,
           el.w / 2,
           el.h / 2,
           0, 0, Math.PI * 2
@@ -136,10 +164,10 @@ class GameEngine {
         ctx.fill();
 
         if (el.label) {
-          ctx.fillStyle = 'rgba(255,255,255,0.7)';
-          ctx.font = '11px system-ui';
+          ctx.fillStyle = 'rgba(255,255,255,0.65)';
+          ctx.font = '600 11px system-ui';
           ctx.textAlign = 'center';
-          ctx.fillText(el.label, el.x + el.w / 2, el.y + el.h / 2 + 4);
+          ctx.fillText(el.label, el.x, el.y + 4);
         }
       }
 
@@ -147,211 +175,462 @@ class GameEngine {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SISTEMA DE PARTÍCULAS Y ANIMACIÓN DINÁMICA DE FUEGO
+  // ─────────────────────────────────────────────────────────────────────────────
+
   /**
-   * Dibuja el efecto de fuego animado en un punto de origen.
-   * @param {{x:number, y:number, r:number}} fp - Punto de fuego (x, y, radio base)
+   * Dibuja el fuego con sistema de partículas, gradiente térmico y resplandor.
+   * @param {{x:number, y:number, r:number}} fp - Foco del fuego
+   * @param {{base:{x,y,w,h}, top:{x,y,w,h}}} [boxes] - Hitboxes activos
    */
-  _drawFire(fp) {
+  _drawFire(fp, boxes) {
     const ctx = this.ctx;
     const intensity = this.state.fireIntensity / 100; // 0.0 – 1.0
-    const t = Date.now() / 1000;                       // tiempo en segundos para animación
-    const r = fp.r * intensity;                        // radio escalado por intensidad
+    const t = performance.now() / 1000;
 
-    if (r < 2) return; // Fuego extinguido
+    // Si el fuego está completamente extinguido y no hay partículas residuales, salir
+    if (intensity <= 0 && this.particles.length === 0) return;
 
     ctx.save();
 
-    // ── Gradientes radiales superpuestos (efecto de masa de fuego) ───────────
-    const gradients = [
-      { innerColor: 'rgba(255,30,0,0.9)',   outerColor: 'rgba(255,100,0,0)',   rx: 0,    ry: 0,    rr: r },
-      { innerColor: 'rgba(255,120,0,0.75)', outerColor: 'rgba(255,200,50,0)', rx: -r*0.2, ry: r*0.1, rr: r * 0.75 },
-      { innerColor: 'rgba(255,230,50,0.6)', outerColor: 'rgba(255,180,0,0)', rx: r*0.15,  ry: r*0.05, rr: r * 0.5 },
-    ];
+    // ── 1. RESPLANDOR AMBIENTAL (GLOW) CÁLIDO ────────────────────────────────
+    if (intensity > 0) {
+      const flickerPulse = 1 + Math.sin(t * 8) * 0.08 + Math.cos(t * 13) * 0.04;
+      const glowRadius = Math.max(20, (fp.r * 2.6 * flickerPulse) * intensity);
 
-    for (const g of gradients) {
-      const grd = ctx.createRadialGradient(
-        fp.x + g.rx, fp.y + g.ry, 0,
-        fp.x + g.rx, fp.y + g.ry, g.rr
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const glowGrad = ctx.createRadialGradient(
+        fp.x, fp.y - 10, 0,
+        fp.x, fp.y - 10, glowRadius
       );
-      grd.addColorStop(0, g.innerColor);
-      grd.addColorStop(1, g.outerColor);
-      ctx.fillStyle = grd;
+      glowGrad.addColorStop(0.0, `rgba(255, 140, 20, ${(0.42 * intensity).toFixed(3)})`);
+      glowGrad.addColorStop(0.4, `rgba(239, 68, 68, ${(0.18 * intensity).toFixed(3)})`);
+      glowGrad.addColorStop(1.0, 'rgba(239, 68, 68, 0)');
+
+      ctx.fillStyle = glowGrad;
       ctx.beginPath();
-      ctx.ellipse(fp.x + g.rx, fp.y + g.ry, g.rr, g.rr * 1.3, 0, 0, Math.PI * 2);
+      ctx.arc(fp.x, fp.y - 10, glowRadius, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     }
 
-    // ── Lenguas de llama animadas (bezier curves) ────────────────────────────
-    const flameCount = 7; // número de lenguas de llama
-    for (let i = 0; i < flameCount; i++) {
-      const angle = (i / flameCount) * Math.PI * 2;
-      const wobble = Math.sin(t * 3 + i * 1.3) * 0.3; // oscilación temporal
-      const h = r * (1.2 + 0.5 * Math.sin(t * 4 + i * 0.7)) * intensity;
+    // ── 2. GENERACIÓN DE PARTÍCULAS DINÁMICAS ────────────────────────────────
+    if (intensity > 0) {
+      // Cantidad de partículas proporcional a la intensidad del conato
+      const spawnRate = Math.ceil(4 * intensity);
+      const baseSpan = Math.max(MIN_HITBOX_WIDTH * 0.5, fp.r * 1.4 * intensity);
 
-      const baseX = fp.x + Math.cos(angle) * r * 0.4;
-      const baseY = fp.y + Math.sin(angle) * r * 0.3;
-      const tipX  = fp.x + Math.cos(angle + wobble) * r * 0.2;
-      const tipY  = fp.y - h; // la punta sube
+      for (let i = 0; i < spawnRate; i++) {
+        const pX = fp.x + (Math.random() - 0.5) * baseSpan;
+        const pY = fp.y + (Math.random() - 0.5) * 8;
+        this._spawnFlameParticle(pX, pY, intensity);
+      }
 
-      // Puntos de control para la curva bezier
-      const cp1x = baseX + Math.cos(angle + Math.PI / 2) * r * 0.3;
-      const cp1y = baseY - h * 0.4;
-      const cp2x = tipX  + Math.cos(angle - Math.PI / 3) * r * 0.2;
-      const cp2y = tipY  + h * 0.3;
+      // Generar chispas/brasas ascendentes de forma aleatoria
+      if (Math.random() < 0.35 * intensity) {
+        this._spawnSparkParticle(fp, baseSpan);
+      }
 
-      // Color degradado de la llama
-      const flameGrad = ctx.createLinearGradient(baseX, baseY, tipX, tipY);
-      flameGrad.addColorStop(0,   'rgba(255, 60, 0, 0.9)');
-      flameGrad.addColorStop(0.5, 'rgba(255,160, 0, 0.7)');
-      flameGrad.addColorStop(1,   'rgba(255,240,50, 0)');
-
-      ctx.beginPath();
-      ctx.moveTo(baseX, baseY);
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tipX, tipY);
-      ctx.strokeStyle = flameGrad;
-      ctx.lineWidth = r * 0.18 * (1 - i / flameCount * 0.5);
-      ctx.lineCap = 'round';
-      ctx.stroke();
+      // Si arde libremente (sin impacto del extintor), emitir humo oscuro en la parte superior
+      if (!this.isHittingBase && Math.random() < 0.25 * intensity) {
+        this._spawnSmokeParticle(fp, intensity);
+      }
     }
 
-    // ── Humo (círculos grises semitransparentes que suben desde la llama) ────
-    const smokeCount = 5;
-    for (let i = 0; i < smokeCount; i++) {
-      const phase = ((t * 0.4 + i / smokeCount) % 1); // 0–1 ciclo de vida
-      const smokeY  = fp.y - r * 1.5 - phase * r * 2;
-      const smokeX  = fp.x + Math.sin(t + i * 1.7) * r * 0.3;
-      const smokeR  = r * 0.3 * (1 + phase);
-      const alpha   = 0.35 * (1 - phase) * intensity;
+    // Si el extintor está impactando la base, emitir partículas densas de vapor blanco
+    if (this.state.shooting && this.state.pinPulled && this.isHittingBase && boxes) {
+      const steamCount = this.snapToZero ? 5 : 3;
+      this._emitSteam(boxes.base, steamCount);
+    }
 
+    // ── 3. ACTUALIZAR Y DIBUJAR PARTÍCULAS ACTIVAS ───────────────────────────
+    this._updateAndDrawParticles(ctx);
+
+    // ── 4. NÚCLEO TÉRMICO VISUAL DE LA BASE (INDICADOR DE OBJETIVO) ───────────
+    if (intensity > 0) {
+      const corePulse = 1 + Math.sin(t * 12) * 0.1;
+      const coreW = Math.max(30, (fp.r * 1.1 * corePulse) * intensity);
+      const coreH = Math.max(14, (fp.r * 0.45 * corePulse) * intensity);
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const coreGrad = ctx.createRadialGradient(
+        fp.x, fp.y - 2, 0,
+        fp.x, fp.y - 2, coreW
+      );
+      coreGrad.addColorStop(0.0, `rgba(255, 255, 255, ${(0.95 * intensity).toFixed(2)})`);
+      coreGrad.addColorStop(0.3, `rgba(254, 240, 138, ${(0.85 * intensity).toFixed(2)})`);
+      coreGrad.addColorStop(0.7, `rgba(249, 115, 22, ${(0.45 * intensity).toFixed(2)})`);
+      coreGrad.addColorStop(1.0, 'rgba(239, 68, 68, 0)');
+
+      ctx.fillStyle = coreGrad;
       ctx.beginPath();
-      ctx.arc(smokeX, smokeY, smokeR, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(80,80,80,${alpha.toFixed(2)})`;
+      ctx.ellipse(fp.x, fp.y - 2, coreW, coreH, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     }
 
     ctx.restore();
   }
 
   /**
-   * Dibuja los hitboxes de depuración del fuego (contornos semitransparentes).
-   * hitbox_base = zona inferior (30% del alto de la bounding box)
-   * hitbox_top  = zona superior (70% del alto)
-   * @param {{x:number, y:number, r:number}} fp
+   * Genera una partícula de llama con gradiente térmico por capas.
    */
-  _drawHitboxes(fp) {
-    const ctx = this.ctx;
-    const intensity = this.state.fireIntensity / 100;
-    const r = fp.r * intensity;
-
-    if (r < 2) return;
-
-    const boxW = r * 2;
-    const boxH = r * 2.5;         // alto total del área de fuego
-    const boxX = fp.x - r;
-    const boxY = fp.y - boxH;     // la caja va hacia arriba desde fp.y
-
-    const baseH = boxH * 0.3;     // 30% inferior = hitbox_base
-    const topH  = boxH * 0.7;     // 70% superior = hitbox_top
-
-    ctx.save();
-    ctx.globalAlpha = 0.20;
-
-    // hitbox_base — verde
-    ctx.strokeStyle = '#00ff88';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(boxX, boxY + topH, boxW, baseH);
-
-    // hitbox_top — rojo
-    ctx.strokeStyle = '#ff4444';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(boxX, boxY, boxW, topH);
-
-    ctx.restore();
+  _spawnFlameParticle(x, y, intensity) {
+    const maxLife = 0.45 + Math.random() * 0.35; // 0.45s a 0.8s
+    this.particles.push({
+      type: 'flame',
+      x,
+      y,
+      vx: (Math.random() - 0.5) * 1.4,
+      vy: -(2.5 + Math.random() * 3.5) * (0.6 + intensity * 0.5),
+      radius: (10 + Math.random() * 12) * Math.max(0.4, intensity),
+      age: 0,
+      maxLife,
+      turbulence: 1.2 + Math.random() * 1.8,
+      freq: 8 + Math.random() * 6,
+      seed: Math.random() * Math.PI * 2,
+    });
   }
 
   /**
-   * Devuelve los rectángulos de los hitboxes del primer punto de fuego.
-   * @returns {{ base: DOMRect-like, top: DOMRect-like } | null}
+   * Genera una partícula de chispa/brasa ascendente.
+   */
+  _spawnSparkParticle(fp, baseSpan) {
+    this.particles.push({
+      type: 'spark',
+      x: fp.x + (Math.random() - 0.5) * baseSpan * 0.8,
+      y: fp.y - 5,
+      vx: (Math.random() - 0.5) * 2.8,
+      vy: -(3.5 + Math.random() * 4.0),
+      radius: 1.5 + Math.random() * 1.8,
+      age: 0,
+      maxLife: 0.5 + Math.random() * 0.6,
+      flickerFreq: 15 + Math.random() * 15,
+    });
+  }
+
+  /**
+   * Genera humo oscuro cuando el fuego arde libremente.
+   */
+  _spawnSmokeParticle(fp, intensity) {
+    const riseH = fp.r * 1.8 * intensity;
+    this.particles.push({
+      type: 'smoke',
+      x: fp.x + (Math.random() - 0.5) * (fp.r * 0.8),
+      y: fp.y - riseH,
+      vx: (Math.random() - 0.5) * 1.2,
+      vy: -(1.4 + Math.random() * 1.6),
+      radius: 10 + Math.random() * 8,
+      maxRadius: 28 + Math.random() * 16,
+      age: 0,
+      maxLife: 1.0 + Math.random() * 0.8,
+    });
+  }
+
+  /**
+   * Genera partículas de vapor blanco y polvo extintor al impactar la base.
+   * @param {{x:number, y:number, w:number, h:number}} baseBox
+   * @param {number} count
+   */
+  _emitSteam(baseBox, count = 3) {
+    for (let i = 0; i < count; i++) {
+      const x = baseBox.x + Math.random() * baseBox.w;
+      const y = baseBox.y + baseBox.h * 0.3 + Math.random() * (baseBox.h * 0.7);
+      // Dispersión lateral amplia para confirmar impacto visual
+      const sideDir = Math.random() < 0.5 ? -1 : 1;
+      this.particles.push({
+        type: 'steam',
+        x,
+        y,
+        vx: sideDir * (2.5 + Math.random() * 6.5),
+        vy: -(1.0 + Math.random() * 3.5),
+        radius: 12 + Math.random() * 10,
+        maxRadius: 36 + Math.random() * 20,
+        age: 0,
+        maxLife: 0.45 + Math.random() * 0.35,
+      });
+    }
+  }
+
+  /**
+   * Ráfaga final de vapor blanco denso al activarse el umbral de remate (Snap-to-Zero).
+   * @param {{x:number, y:number, w:number, h:number}} baseBox
+   * @param {number} count
+   */
+  _emitSteamBurst(baseBox, count = 40) {
+    for (let i = 0; i < count; i++) {
+      const x = baseBox.x + Math.random() * baseBox.w;
+      const y = baseBox.y + Math.random() * baseBox.h;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 3.0 + Math.random() * 8.0;
+      this.particles.push({
+        type: 'steam',
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: -Math.abs(Math.sin(angle) * speed) - 1.5,
+        radius: 14 + Math.random() * 12,
+        maxRadius: 45 + Math.random() * 25,
+        age: 0,
+        maxLife: 0.6 + Math.random() * 0.5,
+      });
+    }
+  }
+
+  /**
+   * Actualiza la física y dibuja todas las partículas activas.
+   * @param {CanvasRenderingContext2D} ctx
+   */
+  _updateAndDrawParticles(ctx) {
+    const dt = 1 / 60; // aprox 16.6ms por fotograma
+    const alive = [];
+
+    for (const p of this.particles) {
+      p.age += dt;
+      if (p.age >= p.maxLife) continue;
+
+      const progress = p.age / p.maxLife; // 0.0 -> 1.0
+
+      if (p.type === 'flame') {
+        // Movimiento ondulatorio (turbulencia horizontal sinusoidal)
+        p.x += p.vx + Math.sin(p.age * p.freq + p.seed) * p.turbulence;
+        p.y += p.vy;
+
+        const currentR = p.radius * (1 - progress * 0.45);
+        if (currentR <= 0) continue;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
+        // ── GRADIENTE TÉRMICO POR CAPAS ──
+        let colCenter, colOuter;
+        if (progress < 0.22) {
+          // Capa 1: Base / Núcleo — Blanco y amarillo brillante
+          const a = (1 - progress / 0.22 * 0.15).toFixed(2);
+          colCenter = `rgba(255, 255, 255, ${a})`;
+          colOuter  = `rgba(254, 240, 138, ${(a * 0.8).toFixed(2)})`;
+        } else if (progress < 0.62) {
+          // Capa 2: Cuerpo medio — Naranja intenso
+          const normP = (progress - 0.22) / 0.40;
+          const a = (0.85 * (1 - normP * 0.3)).toFixed(2);
+          colCenter = `rgba(249, 115, 22, ${a})`;
+          colOuter  = `rgba(234, 88, 12, ${(a * 0.6).toFixed(2)})`;
+        } else {
+          // Capa 3: Puntas — Rojo vivo que se desvanece
+          const normP = (progress - 0.62) / 0.38;
+          const a = Math.max(0, 0.65 * (1 - normP)).toFixed(2);
+          colCenter = `rgba(220, 38, 38, ${a})`;
+          colOuter  = `rgba(185, 28, 28, 0)`;
+        }
+
+        const radGrad = ctx.createRadialGradient(
+          p.x, p.y, 0,
+          p.x, p.y, currentR
+        );
+        radGrad.addColorStop(0, colCenter);
+        radGrad.addColorStop(1, colOuter);
+
+        ctx.fillStyle = radGrad;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, currentR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+      } else if (p.type === 'spark') {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy *= 0.98;
+
+        const sparkAlpha = Math.max(0, 1 - progress);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(254, 240, 138, ${sparkAlpha.toFixed(2)})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+      } else if (p.type === 'smoke') {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.radius += (p.maxRadius - p.radius) * 0.04;
+
+        const smokeAlpha = Math.max(0, 0.32 * (1 - progress));
+        ctx.save();
+        ctx.fillStyle = `rgba(60, 64, 75, ${smokeAlpha.toFixed(2)})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+      } else if (p.type === 'steam') {
+        // Vapor blanco denso del extintor
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.95; // Fricción con el aire
+        p.vy *= 0.96;
+        p.radius += (p.maxRadius - p.radius) * 0.08;
+
+        const steamAlpha = Math.max(0, 0.75 * (1 - progress));
+        ctx.save();
+        const steamGrad = ctx.createRadialGradient(
+          p.x, p.y, 0,
+          p.x, p.y, p.radius
+        );
+        steamGrad.addColorStop(0.0, `rgba(255, 255, 255, ${steamAlpha.toFixed(2)})`);
+        steamGrad.addColorStop(0.5, `rgba(224, 242, 254, ${(steamAlpha * 0.6).toFixed(2)})`);
+        steamGrad.addColorStop(1.0, 'rgba(224, 242, 254, 0)');
+
+        ctx.fillStyle = steamGrad;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      alive.push(p);
+    }
+
+    this.particles = alive;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MECÁNICA DE COLISIONES, HITBOXES Y ÁREA DE EFECTO (AoE)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Devuelve los rectángulos de los hitboxes con desacoplamiento visual:
+   * Regla 1: Aunque las llamas se reduzcan, la base nunca es menor a
+   * MIN_HITBOX_WIDTH x MIN_HITBOX_HEIGHT centrada en el foco.
+   * @returns {{ base: {x,y,w,h}, top: {x,y,w,h} } | null}
    */
   _getHitboxes() {
     const scenario = this._currentScenario();
-    if (!scenario) return null;
+    if (!scenario || !scenario.visualConfig || !scenario.visualConfig.firePoints.length) {
+      return null;
+    }
 
     const fp = scenario.visualConfig.firePoints[0];
     const intensity = this.state.fireIntensity / 100;
-    const r = fp.r * intensity;
 
-    const boxW = r * 2;
-    const boxH = r * 2.5;
-    const boxX = fp.x - r;
-    const boxY = fp.y - boxH;
-    const topH  = boxH * 0.7;
-    const baseH = boxH * 0.3;
+    // Dimensiones escalares brutas según intensidad
+    const rawBaseW = fp.r * 2.2 * Math.max(0.2, intensity);
+    const rawBaseH = fp.r * 0.9 * Math.max(0.2, intensity);
+
+    // ── REGLA 1: TAMAÑO MÍNIMO DE HITBOX (DESACOPLADO DE LO VISUAL) ───────────
+    const baseW = Math.max(rawBaseW, MIN_HITBOX_WIDTH);
+    const baseH = Math.max(rawBaseH, MIN_HITBOX_HEIGHT);
+
+    // Centrado en el foco del conato (fp.x, fp.y)
+    const baseX = fp.x - baseW / 2;
+    const baseY = fp.y - baseH * 0.75;
+
+    // Hitbox superior (cuerpo y punta de las llamas)
+    const topW = Math.max(rawBaseW * 1.1, MIN_HITBOX_WIDTH * 0.95);
+    const topH = Math.max(fp.r * 2.4 * intensity, 65);
+    const topX = fp.x - topW / 2;
+    const topY = baseY - topH;
 
     return {
-      base: { x: boxX, y: boxY + topH, w: boxW, h: baseH },
-      top:  { x: boxX, y: boxY,        w: boxW, h: topH  },
+      base: { x: baseX, y: baseY, w: baseW, h: baseH },
+      top:  { x: topX,  y: topY,  w: topW,  h: topH  },
     };
   }
 
   /**
-   * Verifica si un punto cae dentro de un rectángulo de hitbox.
-   * @param {{x,y}} pt
-   * @param {{x,y,w,h}} box
+   * Regla 2: Radio de Dispersión del Chorro (Área de Efecto / AoE)
+   * Evalúa la colisión como un círculo de aspersión contra una caja rectangular.
+   * @param {{x: number, y: number, r: number}} circle - Círculo de aspersión
+   * @param {{x: number, y: number, w: number, h: number}} box - Caja rectangular
    * @returns {boolean}
    */
-  _inBox(pt, box) {
-    return (
-      pt.x >= box.x &&
-      pt.x <= box.x + box.w &&
-      pt.y >= box.y &&
-      pt.y <= box.y + box.h
-    );
+  _circleIntersectsBox(circle, box) {
+    if (!box) return false;
+    const closestX = Math.max(box.x, Math.min(circle.x, box.x + box.w));
+    const closestY = Math.max(box.y, Math.min(circle.y, box.y + box.h));
+    const distX = circle.x - closestX;
+    const distY = circle.y - closestY;
+    return (distX * distX + distY * distY) <= (circle.r * circle.r);
   }
 
   /**
-   * Dibuja la mira/retícula de apuntado en la posición del puntero.
+   * Dibuja los hitboxes de depuración en pantalla para retroalimentación didáctica.
+   * @param {{base:{x,y,w,h}, top:{x,y,w,h}}} boxes
+   */
+  _drawHitboxes(boxes) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+
+    // hitbox_base — verde (zona correcta)
+    ctx.strokeStyle = this.isHittingBase ? '#22c55e' : '#00ff88';
+    ctx.lineWidth = this.isHittingBase ? 3 : 2;
+    ctx.strokeRect(boxes.base.x, boxes.base.y, boxes.base.w, boxes.base.h);
+
+    // hitbox_top — rojo (zona incorrecta)
+    ctx.strokeStyle = this.isHittingTop ? '#f97316' : '#ff4444';
+    ctx.lineWidth = this.isHittingTop ? 3 : 2;
+    ctx.strokeRect(boxes.top.x, boxes.top.y, boxes.top.w, boxes.top.h);
+
+    ctx.restore();
+  }
+
+  /**
+   * Dibuja la mira con retroalimentación visual del área de efecto (AoE).
    */
   _drawReticle() {
     const ctx = this.ctx;
     const { x, y } = this.pointerPos;
-    const radius = 24;
+    const r = this.currentSprayRadius;
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+
+    // ── Halo del Radio de Dispersión (AoE) ───────────────────────────────────
+    let aoeColor = 'rgba(255, 255, 255, 0.25)';
+    if (this.state.shooting && this.state.pinPulled) {
+      if (this.isHittingBase) {
+        aoeColor = 'rgba(34, 197, 94, 0.7)'; // Verde impacto base
+      } else if (this.isHittingTop) {
+        aoeColor = 'rgba(249, 115, 22, 0.7)'; // Naranja alerta llamas
+      } else {
+        aoeColor = 'rgba(96, 165, 250, 0.45)'; // Azul descarga libre
+      }
+    }
+
+    ctx.strokeStyle = aoeColor;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── Mira central clásica ────────────────────────────────────────────────
+    ctx.strokeStyle = this.isHittingBase ? '#4ade80' : 'rgba(255,255,255,0.95)';
     ctx.lineWidth = 2;
 
-    // Círculo exterior
+    // Círculo central
     ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.arc(x, y, 16, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Cruz de la mira
-    const arm = radius + 8;
-    const gap = 6;
-    // horizontal izquierda
+    // Brazos de la cruz
+    const arm = 24;
+    const gap = 5;
+    // horizontal
     ctx.beginPath();
-    ctx.moveTo(x - arm, y);
-    ctx.lineTo(x - gap, y);
-    ctx.stroke();
-    // horizontal derecha
-    ctx.beginPath();
-    ctx.moveTo(x + gap, y);
-    ctx.lineTo(x + arm, y);
-    ctx.stroke();
-    // vertical arriba
-    ctx.beginPath();
-    ctx.moveTo(x, y - arm);
-    ctx.lineTo(x, y - gap);
-    ctx.stroke();
-    // vertical abajo
-    ctx.beginPath();
-    ctx.moveTo(x, y + gap);
-    ctx.lineTo(x, y + arm);
+    ctx.moveTo(x - arm, y); ctx.lineTo(x - gap, y);
+    ctx.moveTo(x + gap, y); ctx.lineTo(x + arm, y);
+    // vertical
+    ctx.moveTo(x, y - arm); ctx.lineTo(x, y - gap);
+    ctx.moveTo(x, y + gap); ctx.lineTo(x, y + arm);
     ctx.stroke();
 
     // Punto central
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillStyle = this.isHittingBase ? '#22c55e' : 'rgba(255,255,255,0.85)';
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, Math.PI * 2);
     ctx.fill();
@@ -360,7 +639,7 @@ class GameEngine {
   }
 
   /**
-   * Dibuja el chorro de descarga del extintor (bezier desde la base del canvas al puntero).
+   * Dibuja el chorro del extintor con apertura en abanico según el radio de aspersión.
    */
   _drawStream() {
     const ctx = this.ctx;
@@ -368,47 +647,50 @@ class GameEngine {
     const H = this.canvas.height;
     const { x: tx, y: ty } = this.pointerPos;
 
-    // Punto de origen: centro inferior del canvas
+    // Origen: centro inferior del canvas (boquilla del extintor)
     const sx = W / 2;
     const sy = H;
 
-    // Punto de control de la curva
-    const cpx = (sx + tx) / 2 + (Math.random() - 0.5) * 10;
-    const cpy = (sy + ty) / 2 - 60;
+    // Punto de control para curvatura natural
+    const cpx = (sx + tx) / 2 + (Math.random() - 0.5) * 8;
+    const cpy = (sy + ty) / 2 - 50;
 
     ctx.save();
 
-    // Resplandor blanco/cyan con gradiente lineal
+    // Chorro principal
     const streamGrad = ctx.createLinearGradient(sx, sy, tx, ty);
-    streamGrad.addColorStop(0,   'rgba(200,240,255,0.9)');
-    streamGrad.addColorStop(0.5, 'rgba(100,220,255,0.6)');
-    streamGrad.addColorStop(1,   'rgba(255,255,255,0.1)');
+    streamGrad.addColorStop(0,   'rgba(240, 249, 255, 0.95)');
+    streamGrad.addColorStop(0.6, 'rgba(186, 230, 253, 0.7)');
+    streamGrad.addColorStop(1,   'rgba(255, 255, 255, 0.3)');
 
-    // Halo externo (glow)
+    // Halo exterior
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.quadraticCurveTo(cpx, cpy, tx, ty);
-    ctx.strokeStyle = 'rgba(150,230,255,0.3)';
-    ctx.lineWidth = 14;
+    ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
+    ctx.lineWidth = 18;
     ctx.lineCap = 'round';
     ctx.stroke();
 
-    // Chorro central (más estrecho)
+    // Núcleo presurizado
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.quadraticCurveTo(cpx, cpy, tx, ty);
     ctx.strokeStyle = streamGrad;
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 6;
     ctx.lineCap = 'round';
     ctx.stroke();
 
-    // Partículas en el extremo del chorro
-    for (let i = 0; i < 4; i++) {
-      const px = tx + (Math.random() - 0.5) * 20;
-      const py = ty + (Math.random() - 0.5) * 20;
+    // Cono de polvo en el punto de impacto
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * this.currentSprayRadius;
+      const px = tx + Math.cos(angle) * dist;
+      const py = ty + Math.sin(angle) * dist;
+
       ctx.beginPath();
-      ctx.arc(px, py, 3 + Math.random() * 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(200,240,255,0.5)';
+      ctx.arc(px, py, 2 + Math.random() * 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.6)';
       ctx.fill();
     }
 
@@ -416,14 +698,13 @@ class GameEngine {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // BUCLE DE COMBATE
+  // BUCLE DE COMBATE ACTIVO Y CONTROL DE EXTINCIÓN
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
    * Inicia el bucle de animación de combate con requestAnimationFrame.
    */
   startCombatLoop() {
-    // Cancelar cualquier bucle previo
     if (this.state.animFrame) {
       cancelAnimationFrame(this.state.animFrame);
       this.state.animFrame = null;
@@ -432,112 +713,157 @@ class GameEngine {
     const scenario = this._currentScenario();
 
     const loop = () => {
-      // Renderizar la escena en cada fotograma
+      // 1. Renderizar la escena en cada fotograma
       this.renderScene(scenario);
 
+      const boxes = this._getHitboxes();
+
       if (this.state.shooting && this.state.pinPulled) {
-        // ── Drenar la carga del extintor ─────────────────────────────────────
+        // Drenar la carga del extintor
         this.state.extinguisherCharge = Math.max(
           0,
           this.state.extinguisherCharge - 0.4
         );
 
-        // ── Evaluar posición del puntero en los hitboxes ──────────────────────
-        const boxes = this._getHitboxes();
+        // Evaluar colisión con el área de aspersión del chorro (AoE)
         if (boxes) {
-          if (this._inBox(this.pointerPos, boxes.base)) {
-            // ✅ Apunta a la BASE: reducir fuego
-            let reduction = 0.6;
+          const sprayCircle = {
+            x: this.pointerPos.x,
+            y: this.pointerPos.y,
+            r: this.currentSprayRadius
+          };
 
-            // Bonus de barrido: duplicar reducción si se detectó el movimiento
+          const hitBase = this._circleIntersectsBox(sprayCircle, boxes.base);
+          const hitTop  = !hitBase && this._circleIntersectsBox(sprayCircle, boxes.top);
+
+          this.isHittingBase = hitBase;
+          this.isHittingTop  = hitTop;
+
+          if (hitBase) {
+            // ✅ Chorro impacta la BASE del fuego
+            let reduction = 0.65;
+
+            // Bono de barrido (×2.0) si el jugador realiza el movimiento continuo de lado a lado
             if (this.state.sweepDetected) {
-              reduction *= 2;
+              reduction *= 2.0;
             }
 
-            this.state.fireIntensity = Math.max(
-              0,
-              this.state.fireIntensity - reduction
-            );
+            this.state.fireIntensity = Math.max(0, this.state.fireIntensity - reduction);
             this.state.baseHits++;
             this.state.tape.A = true;
 
-            // Ocultar la alerta de apuntado incorrecto
+            // Ocultar alerta de mal apuntado
             if (typeof UI !== 'undefined') UI.showAimAlert(false);
 
-          } else if (this._inBox(this.pointerPos, boxes.top)) {
-            // ❌ Apunta al TOPE: sin reducción, advertencia al jugador
+            // ── REGLA 3: UMBRAL DE REMATE AUTOMÁTICO (SNAP-TO-ZERO) ──────────
+            // Al bajar del 8% aplicando el chorro a la base, se remata a 0% en 0.25s
+            if (this.state.fireIntensity > 0 && this.state.fireIntensity <= EXTINGUISH_THRESHOLD) {
+              if (!this.snapToZero) {
+                this.snapToZero = true;
+                this.snapStartTime = performance.now();
+                this.snapStartIntensity = this.state.fireIntensity;
+                // Liberar ráfaga final de vapor blanco
+                this._emitSteamBurst(boxes.base, 45);
+              }
+            }
+
+          } else if (hitTop) {
+            // ❌ Chorro impacta en las llamas superiores (sin reducción)
             this.state.topHits++;
             if (typeof UI !== 'undefined') UI.showAimAlert(true);
           } else {
-            // Fuera del área: ocultar advertencia
+            // Fuera de área
             if (typeof UI !== 'undefined') UI.showAimAlert(false);
           }
         }
 
-        // ── Audio del extintor ────────────────────────────────────────────────
+        // Sonido de descarga presurizada
         this.playExtinguisherSound(true);
       } else {
-        // Silenciar el extintor cuando no está disparando
+        this.isHittingBase = false;
+        this.isHittingTop  = false;
         this.playExtinguisherSound(false);
       }
 
-      // ── Audio del fuego según intensidad ─────────────────────────────────────
+      // Transición progresiva del remate automático (Snap-to-Zero)
+      if (this.snapToZero && boxes) {
+        const elapsed = performance.now() - this.snapStartTime;
+        const progress = Math.min(1.0, elapsed / 250); // 0.25 segundos
+        this.state.fireIntensity = Math.max(0, this.snapStartIntensity * (1.0 - progress));
+        this._emitSteam(boxes.base, 3);
+
+        if (progress >= 1.0 || this.state.fireIntensity <= 0) {
+          this.state.fireIntensity = 0;
+          this.snapToZero = false;
+        }
+      }
+
+      // Audio del fuego proporcional a la intensidad
       this.playFireCrackle(this.state.fireIntensity);
 
-      // ── Verificar condición de victoria ──────────────────────────────────────
+      // Verificar condición de victoria
       if (this.state.fireIntensity <= 0) {
         this.endPhase('victory');
-        return; // Detener el bucle
+        return;
       }
 
-      // ── Verificar condición de derrota ────────────────────────────────────────
+      // Verificar condición de derrota
       if (this.state.extinguisherCharge <= 0 || this.state.timeLeft <= 0) {
         this.endPhase('defeat');
-        return; // Detener el bucle
+        return;
       }
 
-      // Continuar el bucle en el siguiente fotograma
+      // Continuar el bucle de animación
       this.state.animFrame = requestAnimationFrame(loop);
     };
 
     this.state.animFrame = requestAnimationFrame(loop);
 
-    // ── Temporizador de cuenta regresiva (1 segundo por tick) ─────────────────
+    // Cronómetro de cuenta regresiva (30s)
     if (this.state.timerInterval) {
       clearInterval(this.state.timerInterval);
     }
 
     this.state.timerInterval = setInterval(() => {
       if (this.state.phase !== 'combat') return;
-
       this.state.timeLeft = Math.max(0, this.state.timeLeft - 1);
-
-      // La condición de derrota por tiempo se evalúa en el bucle de animación
     }, 1000);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // EVENTOS DEL PUNTERO
+  // EVENTOS DEL PUNTERO (POINTER EVENTS: TOUCH & MOUSE)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Configura los eventos de puntero en el canvas para controlar el extintor.
+   * Configura los eventos unificados de puntero en el canvas.
    */
   setupPointerEvents() {
     if (this._pointerEventsAttached) return;
     this._pointerEventsAttached = true;
     const canvas = this.canvas;
 
-    // ── pointerdown: empezar a disparar ──────────────────────────────────────
+    // ── pointerdown: comenzar a presionar la manija ──────────────────────────
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+
+      // Si no ha quitado el seguro y estamos en preparación, advertir
+      if (!this.state.pinPulled && this.state.phase === 'prepare') {
+        if (typeof window.AudioManager !== 'undefined' && typeof window.AudioManager.playDangerAlert === 'function') {
+          window.AudioManager.playDangerAlert();
+        }
+        if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
+          UI.showToast('¡Primero tira del seguro para liberar la manija!', 'warning');
+        }
+        return;
+      }
+
       canvas.setPointerCapture(e.pointerId);
       this.state.shooting = true;
-      this.state.tape.P = true; // Se presionó el maneral
+      this.state.tape.P = true; // Presionar manija
       this._updatePointerPos(e);
     });
 
-    // ── pointermove: actualizar posición y detectar barrido ───────────────────
+    // ── pointermove: apuntado continuo y detección de barrido ────────────────
     canvas.addEventListener('pointermove', (e) => {
       e.preventDefault();
       const prevX = this.pointerPos.x;
@@ -546,40 +872,30 @@ class GameEngine {
       if (this.state.phase === 'combat') {
         this._trackSweep(prevX);
 
-        // Mostrar/ocultar consejo de barrido según posición
-        const boxes = this._getHitboxes();
-        if (boxes && this._inBox(this.pointerPos, boxes.top)) {
-          if (typeof UI !== 'undefined') UI.showAimAlert(true);
-        } else {
-          if (typeof UI !== 'undefined') UI.showAimAlert(false);
-        }
-
-        // Mostrar sugerencia de barrido si aún no se ha detectado
-        if (!this.state.sweepDetected && this.state.baseHits > 30) {
+        // Sugerencia de barrido si lleva tiempo apuntando a la base sin barrer
+        if (!this.state.sweepDetected && this.state.baseHits > 35) {
           if (typeof UI !== 'undefined') UI.showSweepTip(true);
         }
       }
     });
 
-    // ── pointerup: dejar de disparar ─────────────────────────────────────────
+    // ── pointerup: liberar la manija de descarga ─────────────────────────────
     canvas.addEventListener('pointerup', (e) => {
       e.preventDefault();
       this.state.shooting = false;
     });
 
-    // Cancelar disparo si el puntero sale del área capturada
     canvas.addEventListener('pointercancel', () => {
       this.state.shooting = false;
     });
   }
 
   /**
-   * Actualiza la posición del puntero relativa al canvas.
+   * Actualiza la posición del puntero y calibra el radio de aspersión.
    * @param {PointerEvent} e
    */
   _updatePointerPos(e) {
     const rect = this.canvas.getBoundingClientRect();
-    // Escalar coordenadas al espacio del canvas (puede diferir del tamaño CSS)
     const scaleX = this.canvas.width  / rect.width;
     const scaleY = this.canvas.height / rect.height;
 
@@ -587,90 +903,83 @@ class GameEngine {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top)  * scaleY,
     };
+
+    // Detectar pantalla táctil para aplicar SPRAY_RADIUS_TOUCH (60px)
+    this.isTouch = (e.pointerType === 'touch');
+    this.currentSprayRadius = this.isTouch ? SPRAY_RADIUS_TOUCH : SPRAY_RADIUS;
   }
 
   /**
-   * Rastrea el movimiento horizontal del puntero para detectar el barrido.
-   * Si el puntero recorre más de 80 px sobre la base en los últimos 60 fotogramas
-   * se activa la bonificación de barrido (tape.E = true).
-   * @param {number} prevX - Posición X del puntero en el fotograma anterior
+   * Rastrea el desplazamiento horizontal para activar el bono de barrido (x2.0).
+   * @param {number} prevX
    */
   _trackSweep(prevX) {
     const currentX = this.pointerPos.x;
     const delta = Math.abs(currentX - prevX);
 
-    // Acumular distancia de barrido
     this.state.sweepDistance += delta;
-
-    // Mantener historial de las últimas 60 posiciones X
     this._pointerHistory.push(currentX);
+
     if (this._pointerHistory.length > 60) {
       this._pointerHistory.shift();
     }
 
-    // Verificar si el rango de movimiento supera los 80 px
     if (this._pointerHistory.length >= 10) {
       const minX = Math.min(...this._pointerHistory);
       const maxX = Math.max(...this._pointerHistory);
 
       const boxes = this._getHitboxes();
-      const overBase = boxes && this._inBox(this.pointerPos, boxes.base);
+      const overBase = boxes && this._circleIntersectsBox({
+        x: this.pointerPos.x,
+        y: this.pointerPos.y,
+        r: this.currentSprayRadius
+      }, boxes.base);
 
+      // Si barre más de 80px sobre la base, activar bono permanente
       if ((maxX - minX) > 80 && overBase && !this.state.sweepDetected) {
         this.state.sweepDetected = true;
-        this.state.tape.E = true;
+        this.state.tape.E = true; // Esparcir en barrido
 
-        // Ocultar el consejo de barrido ya que se realizó correctamente
         if (typeof UI !== 'undefined') UI.showSweepTip(false);
       }
     }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // INTERACCIÓN CON EL PASADOR (PIN)
+  // OPERACIÓN DEL SEGURO (PASO 1 DE T.A.P.E.)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Ejecuta la acción de jalar el pasador del extintor (Paso 1 de T.A.P.E.).
-   * Método público invocable desde la UI o eventos de entrada.
+   * Ejecuta la acción de retirar el seguro metálico del extintor.
    */
   pullPin() {
-    if (this.state.pinPulled) return; // Ya fue jalado
+    if (this.state.pinPulled) return;
 
     this.state.pinPulled = true;
-    this.state.tape.T = true; // "T" = Jalar el pasador
+    this.state.tape.T = true; // [T] Tirar seguro
 
-    // Efecto de sonido del pasador
     this._playPinClick();
 
-    // Transición a la fase de apuntado / combate
+    // Transición directa al combate activo
     this.startPhase('combat');
     this.startCombatLoop();
   }
 
   /**
-   * Configura la interacción con el elemento del pasador del extintor.
-   * @param {HTMLElement} pinElement - Elemento DOM del pasador (SVG o div)
+   * Vincula la argolla interactiva del seguro.
+   * @param {HTMLElement} pinElement
    */
   setupPinInteraction(pinElement) {
     if (!pinElement) return;
-
-    const pullPinHandler = () => {
-      this.pullPin();
-    };
-
-    pinElement.addEventListener('click',      pullPinHandler);
-    pinElement.addEventListener('pointerup',  pullPinHandler);
+    const pullHandler = () => this.pullPin();
+    pinElement.addEventListener('click',     pullHandler);
+    pinElement.addEventListener('pointerup', pullHandler);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // AUDIO
+  // AUDIO SINTETIZADO
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Inicia o detiene el sonido de descarga del extintor.
-   * @param {boolean} active - true para activar, false para silenciar
-   */
   playExtinguisherSound(active) {
     if (typeof window.AudioManager !== 'undefined' &&
         typeof window.AudioManager.playExtinguisherSound === 'function') {
@@ -678,10 +987,6 @@ class GameEngine {
     }
   }
 
-  /**
-   * Ajusta el volumen del crepitar del fuego según su intensidad.
-   * @param {number} intensity - 0–100
-   */
   playFireCrackle(intensity) {
     if (typeof window.AudioManager !== 'undefined' &&
         typeof window.AudioManager.playFireCrackle === 'function') {
@@ -689,10 +994,6 @@ class GameEngine {
     }
   }
 
-  /**
-   * Reproduce el sonido de jalado del pasador.
-   * Usa AudioManager si está disponible; si no, genera un pitido sintético.
-   */
   _playPinClick() {
     if (typeof window.AudioManager !== 'undefined' &&
         typeof window.AudioManager.playPinClick === 'function') {
@@ -700,7 +1001,6 @@ class GameEngine {
       return;
     }
 
-    // Respaldo: oscilador sintético simple con la Web Audio API
     if (!this.audioCtx) return;
     try {
       const osc = this.audioCtx.createOscillator();
@@ -708,77 +1008,54 @@ class GameEngine {
       osc.connect(gain);
       gain.connect(this.audioCtx.destination);
       osc.type = 'square';
-      osc.frequency.setValueAtTime(600, this.audioCtx.currentTime);
+      osc.frequency.setValueAtTime(700, this.audioCtx.currentTime);
       gain.gain.setValueAtTime(0.3, this.audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.12);
       osc.start();
-      osc.stop(this.audioCtx.currentTime + 0.15);
-    } catch (err) {
-      // Ignorar errores de audio en entornos sin soporte
-    }
+      osc.stop(this.audioCtx.currentTime + 0.12);
+    } catch (_) {}
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // GESTIÓN DE FASES
+  // FASES Y MÉTRICAS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Transiciona el juego a una nueva fase.
-   * @param {string} name - Nombre de la fase: 'identify'|'select'|'prepare'|'combat'|'victory'|'defeat'
-   */
   startPhase(name) {
     this.state.phase = name;
-
     if (typeof UI !== 'undefined' && typeof UI.showPhase === 'function') {
       UI.showPhase(name, this._currentScenario());
     }
   }
 
-  /**
-   * Finaliza la fase de combate con un resultado.
-   * Detiene todos los bucles y muestra el resultado al jugador.
-   * @param {'victory'|'defeat'} result
-   */
   endPhase(result) {
-    // Detener el bucle de animación
     if (this.state.animFrame) {
       cancelAnimationFrame(this.state.animFrame);
       this.state.animFrame = null;
     }
 
-    // Detener el temporizador
     if (this.state.timerInterval) {
       clearInterval(this.state.timerInterval);
       this.state.timerInterval = null;
     }
 
-    // Silenciar todos los sonidos
     this.playExtinguisherSound(false);
     this.playFireCrackle(0);
 
-    // Actualizar la fase
     this.state.phase = result;
 
-    // Mostrar el resultado con las métricas
     if (typeof UI !== 'undefined' && typeof UI.showResult === 'function') {
       UI.showResult(result, this.getMetrics());
     }
   }
 
-  /**
-   * Calcula y devuelve las métricas de desempeño del jugador.
-   * @returns {{accuracy, baseRatio, chargeLeft, diagnosisAttempts, selectAttempts, sweepBonus}}
-   */
   getMetrics() {
     const { baseHits, topHits, extinguisherCharge, diagnosisAttempts, selectAttempts, sweepDetected } = this.state;
     const totalHits = baseHits + topHits;
-
     const accuracy  = totalHits > 0 ? (baseHits / totalHits) * 100 : 0;
-    const baseRatio = accuracy; // Igual que accuracy según especificación
 
     return {
-      accuracy:          Math.round(accuracy * 10) / 10, // un decimal
-      baseRatio:         Math.round(baseRatio * 10) / 10,
+      accuracy:          Math.round(accuracy * 10) / 10,
+      baseRatio:         Math.round(accuracy * 10) / 10,
       chargeLeft:        Math.round(extinguisherCharge * 10) / 10,
       diagnosisAttempts,
       selectAttempts,
@@ -786,17 +1063,7 @@ class GameEngine {
     };
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // CICLO DE ESCENARIOS
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Carga y arranca un escenario dado su índice en SCENARIOS.
-   * Reinicia todo el estado del juego antes de comenzar.
-   * @param {number} index - Índice del escenario en el array SCENARIOS
-   */
   loadScenario(index) {
-    // Cancelar cualquier bucle activo
     if (this.state.animFrame) {
       cancelAnimationFrame(this.state.animFrame);
     }
@@ -804,10 +1071,12 @@ class GameEngine {
       clearInterval(this.state.timerInterval);
     }
 
-    // Limpiar historial de barrido
     this._pointerHistory = [];
+    this.particles = [];
+    this.snapToZero = false;
+    this.isHittingBase = false;
+    this.isHittingTop = false;
 
-    // Reiniciar todo el estado del juego
     this.state = {
       phase: 'idle',
       scenarioIndex: index,
@@ -829,37 +1098,24 @@ class GameEngine {
       timerInterval: null,
     };
 
-    // Cargar el escenario y renderizar el estado inicial
     const scenario = this._currentScenario();
-    if (!scenario) {
-      console.error('[GameEngine] Escenario no encontrado en índice:', index);
-      return;
-    }
+    if (!scenario) return;
 
     this.renderScene(scenario);
-
-    // Iniciar la fase de identificación del incendio
     this.startPhase('identify');
   }
 
-  /**
-   * Avanza al siguiente escenario en la lista, en ciclo.
-   */
   nextScenario() {
     const total = (typeof SCENARIOS !== 'undefined') ? SCENARIOS.length : 1;
     const nextIndex = (this.state.scenarioIndex + 1) % total;
     this.loadScenario(nextIndex);
   }
 
-  /**
-   * Devuelve el objeto del escenario actualmente activo.
-   * @returns {object|null}
-   */
   _currentScenario() {
     if (typeof SCENARIOS === 'undefined') return null;
     return SCENARIOS[this.state.scenarioIndex] || null;
   }
 }
 
-// ── Exponer la clase al ámbito global ───────────────────────────────────────
+// Exponer en window
 window.GameEngine = GameEngine;
