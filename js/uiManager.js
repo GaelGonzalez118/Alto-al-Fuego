@@ -360,19 +360,23 @@ const UI = {
 
     switch (fase) {
       case 'identify':
+        if (document.getElementById('msg')) document.getElementById('msg').textContent = 'Fase 1: Diagnóstico de la Fuente. ¿Qué material está ardiendo?';
         UI._renderIdentifyPhase(overlay, sc);
         break;
 
       case 'select':
+        if (document.getElementById('msg')) document.getElementById('msg').textContent = 'Fase 2: Selecciona en el gabinete el extintor correcto para esta Clase.';
         overlay.classList.add('hidden'); // el gabinete se muestra aparte
         UI.renderExtinguisherCabinet(sc);
         break;
 
       case 'prepare':
+        if (document.getElementById('msg')) document.getElementById('msg').textContent = 'Fase 3: ¡Tira del seguro amarillo metálico para desbloquear la manija!';
         UI.showPinInstruction();
         break;
 
       case 'combat':
+        if (document.getElementById('msg')) document.getElementById('msg').textContent = 'Fase 4: Apunta a la BASE del fuego y realiza barrido continuo de lado a lado.';
         overlay.classList.add('hidden');
         UI.showHUD();
         break;
@@ -865,24 +869,24 @@ const UI = {
       </table>
     `;
 
-    // Tarjetas de métricas
+    // Tarjetas de métricas institucionales (Cuenca Cimarrona)
     const metricasHTML = `
       <div class="metrics-grid">
-        <div class="metric-card">
-          <span class="metric-value">${Math.round(metricas.accuracy || 0)}%</span>
-          <span class="metric-label">Precisión de tiro</span>
+        <div class="stat-box cool">
+          <span class="stat-label">Precisión de tiro</span>
+          <span class="big-number">${Math.round(metricas.accuracy || 0)}%</span>
         </div>
-        <div class="metric-card">
-          <span class="metric-value">${Math.round(metricas.baseRatio || 0)}%</span>
-          <span class="metric-label">Disparos en la base</span>
+        <div class="stat-box warm">
+          <span class="stat-label">Disparos en la base</span>
+          <span class="big-number">${Math.round(metricas.baseRatio || 0)}%</span>
         </div>
-        <div class="metric-card">
-          <span class="metric-value">${Math.round(metricas.chargeLeft || 0)}%</span>
-          <span class="metric-label">Carga restante</span>
+        <div class="stat-box cool">
+          <span class="stat-label">Carga restante</span>
+          <span class="big-number">${Math.round(metricas.chargeLeft || 0)}%</span>
         </div>
-        <div class="metric-card ${metricas.sweepBonus ? 'metric-bonus' : ''}">
-          <span class="metric-value">${metricas.sweepBonus ? '✔️' : '✖️'}</span>
-          <span class="metric-label">Movimiento de barrido</span>
+        <div class="stat-box warm ${metricas.sweepBonus ? 'active-alert' : ''}">
+          <span class="stat-label">Movimiento de barrido</span>
+          <span class="big-number">${metricas.sweepBonus ? '✔️ Sí' : '❌ No'}</span>
         </div>
       </div>
     `;
@@ -909,9 +913,9 @@ const UI = {
             ${tablaRef}
           </section>
 
-          <div class="result-actions">
-            <button id="btn-repeat" class="btn-primary">🔄 Repetir escenario</button>
-            <button id="btn-next" class="btn-secondary">▶️ Siguiente escenario</button>
+          <div class="result-actions actions">
+            <button id="btn-repeat" class="btn secondary">🔄 Repetir Escenario</button>
+            <button id="btn-next" class="btn">➡️ Siguiente Escenario</button>
           </div>
         </div>
       `;
