@@ -1,0 +1,1078 @@
+/* ============================================================
+   Misión Extintor — styles.css
+   Mobile-first responsive stylesheet
+   ============================================================ */
+
+/* ── Custom Properties ───────────────────────────────────── */
+:root {
+  --fire-red:      #ef4444;
+  --fire-orange:   #f97316;
+  --fire-yellow:   #fbbf24;
+  --safe-blue:     #2563eb;
+  --safe-green:    #16a34a;
+  --dark-bg:       #0f172a;
+  --card-bg:       #1e293b;
+  --text-primary:  #f8fafc;
+  --text-muted:    #94a3b8;
+  --danger-red:    #dc2626;
+
+  --radius-sm:  6px;
+  --radius-md:  12px;
+  --radius-lg:  20px;
+  --transition: 0.3s ease;
+}
+
+/* ── Reset & Base ────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--dark-bg);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Keyframe Animations ─────────────────────────────────── */
+
+/* Fire flicker */
+@keyframes flicker {
+  0%   { transform: scale(1)    rotate(-1deg); filter: hue-rotate(0deg); }
+  50%  { transform: scale(1.05) rotate(1deg);  filter: hue-rotate(10deg); }
+  100% { transform: scale(0.95) rotate(-0.5deg); filter: hue-rotate(20deg); }
+}
+
+/* Smoke rise */
+@keyframes smoke-rise {
+  0%   { transform: translateY(0);     opacity: 0.6; }
+  100% { transform: translateY(-40px); opacity: 0; }
+}
+
+/* Card shake (danger selection) */
+@keyframes shake {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-6px); }
+  30%  { transform: translateX(6px); }
+  45%  { transform: translateX(-6px); }
+  60%  { transform: translateX(6px); }
+  75%  { transform: translateX(-3px); }
+  90%  { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+
+/* Modal slide-up */
+@keyframes slide-up {
+  from { transform: translateY(40px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* TAPE badge pulse ring */
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0   rgba(249, 115, 22, 0.7); }
+  70%  { box-shadow: 0 0 0 12px rgba(249, 115, 22, 0); }
+  100% { box-shadow: 0 0 0 0   rgba(249, 115, 22, 0); }
+}
+
+/* Alert fade-in-up */
+@keyframes fadeInUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ── Screen Container ────────────────────────────────────── */
+.screen {
+  display: none;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.screen.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── #screen-intro ───────────────────────────────────────── */
+#screen-intro {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem 1rem;
+  background: radial-gradient(ellipse at center top,
+    rgba(239, 68, 68, 0.25) 0%,
+    var(--dark-bg) 60%);
+  gap: 1.5rem;
+}
+
+#screen-intro.active {
+  display: flex;
+}
+
+.intro-flame-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flame-svg,
+.fire-visual {
+  animation: flicker 0.4s ease-in-out infinite alternate;
+  display: block;
+  transform-origin: center bottom;
+}
+
+.game-title {
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--fire-orange), var(--fire-yellow));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.1;
+}
+
+.game-subtitle {
+  font-size: clamp(0.9rem, 2.5vw, 1.1rem);
+  color: var(--text-muted);
+  max-width: 36ch;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0.75rem 1.75rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform var(--transition),
+    box-shadow var(--transition),
+    filter var(--transition);
+  text-decoration: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--fire-orange), var(--fire-red));
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(249, 115, 22, 0.4);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(249, 115, 22, 0.55);
+  filter: brightness(1.1);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 2px solid var(--text-muted);
+}
+
+.btn-secondary:hover {
+  border-color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(248, 250, 252, 0.1);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--danger-red), #b91c1c);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(220, 38, 38, 0.55);
+  filter: brightness(1.1);
+}
+
+.btn-danger:active {
+  transform: translateY(0);
+}
+
+/* ── #screen-scenario ────────────────────────────────────── */
+#screen-scenario {
+  flex-direction: column;
+  align-items: center;
+  background-color: var(--dark-bg);
+}
+
+#screen-scenario.active {
+  display: flex;
+}
+
+/* ── HUD Bar ─────────────────────────────────────────────── */
+.hud {
+  width: 100%;
+  max-width: 800px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.6rem 1rem;
+  background: var(--card-bg);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 120px;
+  min-width: 100px;
+}
+
+.hud-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.hud-bar-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255,255,255,0.08);
+}
+
+.hud-fire-bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--fire-yellow), var(--fire-orange), var(--fire-red));
+  width: 100%;
+  transition: width 0.1s linear;
+}
+
+.hud-charge-bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #60a5fa, var(--safe-blue));
+  width: 100%;
+  transition: width 0.1s linear;
+}
+
+/* Countdown timer circle */
+.hud-timer {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid var(--fire-orange);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--fire-yellow);
+  flex-shrink: 0;
+  background: rgba(249, 115, 22, 0.1);
+  transition: border-color var(--transition), color var(--transition);
+}
+
+.hud-timer.warning {
+  border-color: var(--fire-red);
+  color: var(--fire-red);
+  animation: pulse-ring 1s ease-out infinite;
+}
+
+/* TAPE indicators row */
+.tape-indicators {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ── TAPE Badge ──────────────────────────────────────────── */
+.tape-badge {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  background: #374151;
+  color: var(--text-muted);
+  border: 2px solid transparent;
+  transition: background var(--transition), color var(--transition),
+              border-color var(--transition), box-shadow var(--transition);
+  cursor: default;
+  user-select: none;
+}
+
+.tape-badge.active {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: var(--fire-orange);
+  color: var(--fire-orange);
+  animation: pulse-ring 1.2s ease-out infinite;
+}
+
+.tape-badge.done {
+  background: var(--safe-green);
+  border-color: var(--safe-green);
+  color: #fff;
+}
+
+.tape-badge.done::after {
+  content: "✓";
+  font-size: 1rem;
+  position: absolute;
+}
+
+/* ── Game Canvas ─────────────────────────────────────────── */
+#game-canvas {
+  display: block;
+  width: 100%;
+  max-width: 800px;
+  height: 60vh;
+  background: #111827;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  position: relative;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* ── Phase Overlay ───────────────────────────────────────── */
+.phase-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.75rem 1.25rem;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  transition: opacity var(--transition);
+}
+
+.phase-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.phase-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fire-orange);
+}
+
+.phase-text {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Extinguisher Cards & Cabinet ──────────────────────────── */
+.ext-cards-row,
+.ext-cabinet {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0.75rem 0.5rem;
+  width: 100%;
+  max-width: 800px;
+  margin: 0.5rem auto;
+}
+
+.ext-card {
+  width: 120px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition:
+    transform var(--transition),
+    box-shadow var(--transition),
+    border-color var(--transition);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+
+.ext-card .ext-icon {
+  width: 50px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ext-card .ext-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.ext-card .ext-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.ext-card .ext-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.ext-card .ext-label {
+  font-size: 0.7rem;
+  color: var(--fire-yellow);
+  font-weight: 600;
+}
+
+/* ── Diagnóstico: Clases de Fuego ────────────────────────── */
+.fire-class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 650px;
+  margin: 0.5rem auto;
+}
+
+.btn-fire-class {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.75rem 0.5rem;
+  background: rgba(30, 41, 59, 0.85);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition), background var(--transition);
+  min-height: 85px;
+}
+
+.btn-fire-class:hover {
+  transform: translateY(-3px);
+  border-color: var(--fire-orange);
+  background: rgba(45, 55, 75, 0.95);
+}
+
+.fire-class-icon {
+  font-size: 1.6rem;
+}
+
+.fire-class-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--fire-yellow);
+}
+
+.fire-class-name {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.phase-error {
+  color: var(--fire-red);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-top: 0.5rem;
+  text-align: center;
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.phase-subtitle {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+/* ── Preparación: Pasador y Válvula ───────────────────────── */
+.pin-instruction-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem auto;
+}
+
+.pin-svg {
+  width: 170px;
+  height: 200px;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.6));
+}
+
+.pull-arrow {
+  animation: pullHint 1.2s infinite ease-in-out;
+}
+
+@keyframes pullHint {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-8px); }
+}
+
+.pin-hint {
+  font-size: 0.85rem;
+  color: var(--fire-yellow);
+  font-weight: 600;
+  text-align: center;
+}
+
+.correct-flash {
+  border-color: var(--safe-green) !important;
+  background: rgba(22, 163, 74, 0.3) !important;
+}
+
+.shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+.ext-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.ext-card.selected {
+  border-color: var(--safe-blue);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.3),
+              0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.ext-card.danger {
+  border-color: var(--danger-red);
+  animation: shake 0.4s ease-in-out;
+}
+
+.ext-card-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.ext-card-class {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+/* ── Smoke Particle ──────────────────────────────────────── */
+.smoke-particle {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.35);
+  animation: smoke-rise 2s ease-out infinite;
+  pointer-events: none;
+}
+
+/* ── Modal Overlay ───────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.modal-overlay.active,
+.modal-overlay.modal-visible {
+  display: flex;
+}
+
+/* ── Toast Notifications ─────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 10000;
+  pointer-events: auto;
+  max-width: 90vw;
+}
+
+.toast.toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast-success { background: var(--safe-green); border: 1px solid rgba(255,255,255,0.2); }
+.toast-warning { background: var(--fire-orange); border: 1px solid rgba(255,255,255,0.2); }
+.toast-danger  { background: var(--danger-red); border: 1px solid rgba(255,255,255,0.2); }
+
+.toast-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.8);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  color: #fff;
+}
+
+.modal-box {
+  background: var(--card-bg);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  animation: slide-up 0.3s ease-out both;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+.modal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.modal-body {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: color var(--transition);
+}
+
+.modal-close:hover {
+  color: var(--text-primary);
+}
+
+/* ── Aim Alert & Sweep Tip ───────────────────────────────── */
+.aim-alert,
+.sweep-tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  pointer-events: none;
+  animation: fadeInUp 0.25s ease-out both;
+  transition: opacity var(--transition);
+  z-index: 10;
+}
+
+.aim-alert {
+  background: var(--danger-red);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.5);
+}
+
+.sweep-tip {
+  background: var(--safe-blue);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.5);
+}
+
+.aim-alert.hidden,
+.sweep-tip.hidden {
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+}
+
+/* ── #screen-result ──────────────────────────────────────── */
+#screen-result {
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1rem;
+  gap: 1.25rem;
+}
+
+#screen-result.active {
+  display: flex;
+}
+
+.result-title {
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-weight: 800;
+  text-align: center;
+  background: linear-gradient(135deg, var(--safe-green), #34d399);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.result-subtitle {
+  font-size: 1rem;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 40ch;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 540px;
+}
+
+/* ── Metric Card (glassmorphism) ─────────────────────────── */
+.metric-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: rgba(30, 41, 59, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.metric-icon {
+  font-size: 1.75rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.metric-label {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.metric-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.result-actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+/* ── Lesson Panel ────────────────────────────────────────── */
+.lesson-card {
+  width: 100%;
+  max-width: 540px;
+  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.lesson-heading {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--safe-blue);
+}
+
+.lesson-text {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+/* ── Scenario Info Banner ────────────────────────────────── */
+.scenario-banner {
+  width: 100%;
+  max-width: 800px;
+  padding: 0.6rem 1rem;
+  background: rgba(30, 41, 59, 0.6);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.scenario-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--fire-orange);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  flex-shrink: 0;
+}
+
+.scenario-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── Fire Class Badge ────────────────────────────────────── */
+.fire-class-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--fire-red);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* ── Utility / Helpers ───────────────────────────────────── */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.text-center { text-align: center; }
+.w-full      { width: 100%; }
+.flex-col    { flex-direction: column; }
+
+/* ── Scrollbar (webkit) ──────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--dark-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+/* ============================================================
+   RESPONSIVE BREAKPOINTS
+   ============================================================ */
+
+/* ── Mobile  ≤ 480px ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  #game-canvas {
+    height: 60vh;
+    max-width: 100vw;
+    border-radius: 0;
+  }
+
+  .hud {
+    gap: 0.4rem;
+    padding: 0.5rem 0.6rem;
+  }
+
+  .tape-badge {
+    width: 36px;
+    height: 36px;
+    font-size: 0.6rem;
+  }
+
+  .hud-timer {
+    width: 36px;
+    height: 36px;
+    font-size: 0.75rem;
+  }
+
+  .ext-card {
+    width: 90px;
+    padding: 0.6rem 0.3rem;
+  }
+
+  .modal-box {
+    padding: 1.25rem;
+    border-radius: var(--radius-md);
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  .game-title {
+    font-size: 1.9rem;
+  }
+
+  .phase-overlay {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.3rem;
+  }
+}
+
+/* ── Tablet  481–768px ───────────────────────────────────── */
+@media (min-width: 481px) and (max-width: 768px) {
+  #game-canvas {
+    height: 60vh;
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ext-card {
+    width: 105px;
+  }
+
+  .tape-badge {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* ── Desktop  ≥ 769px ────────────────────────────────────── */
+@media (min-width: 769px) {
+  #game-canvas {
+    height: 500px;
+    border-radius: var(--radius-md);
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ext-cards-row {
+    gap: 1rem;
+  }
+
+  .hud {
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+
+  #screen-scenario {
+    padding: 1.5rem;
+    gap: 0;
+  }
+
+  .scenario-banner {
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+}
